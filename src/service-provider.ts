@@ -34,6 +34,9 @@ export class ServiceProvider implements IServiceProvider {
       throw new Error(`Invalid service name '${serviceName}' provided.`);
     }
 
+    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
+      scopeName, StringUtilities.getEmptyString(), true);
+
     const serviceKey = ServiceProvider.populateServiceKey(serviceName, scopeName);
     const serviceData = this.serviceDataMap.get(serviceKey);
 
