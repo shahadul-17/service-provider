@@ -1,0 +1,34 @@
+{
+  "name": "@shahadul-17/service-provider",
+  "version": "0.0.1",
+  "description": "Defines a mechanism for retrieving service objects. A service object is an object that provides custom support to other objects.",
+  "author": "Md. Shahadul Alam Patwary",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shahadul-17/service-provider.git"
+  },
+  "keywords": [
+    "service provider",
+    "dependency injection"
+  ],
+  "bugs": {
+    "url": "https://github.com/shahadul-17/service-provider/issues"
+  },
+  "homepage": "https://github.com/shahadul-17/service-provider#readme",
+  "devDependencies": {
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "@shahadul-17/collections": "^0.0.2",
+    "@shahadul-17/utilities": "^0.0.1"
+  }
+}
