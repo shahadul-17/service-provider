@@ -44,26 +44,36 @@ export class ServiceProvider implements IServiceProvider {
       throw new Error(`Requested service with name, '${serviceName}' and scope name, '${scopeName}' was not found.`);
     }
 
-    switch (serviceData.scope) {
-      case ServiceScope.Transient:
-        let instance: any = undefined;
+    let instance: any = serviceData.instance;
 
-        // if callback is available...
-        if (typeof serviceData.createCallback === "function") {
-          // executes the callback to create new instance...
-          instance = serviceData.createCallback(serviceData.serviceType);
-        }
+    // if the instance is not an object...
+    if (!ObjectUtilities.isObject(instance)) {
+      // if callback is available...
+      if (typeof serviceData.createCallback === "function") {
+        // we shall execute the callback to create new instance...
+        instance = serviceData.createCallback(serviceData.serviceType);
+      }
 
-        // if callback function is not provided or it did not return an instance...
+      // if callback function is not provided or it did not return an instance...
+      if (!ObjectUtilities.isObject(instance)) {
+        // executes the default constructor...
+        instance = new serviceData.serviceType();
+
+        // if still the instance is not an object...
         if (!ObjectUtilities.isObject(instance)) {
-          // executes the default constructor...
-          instance = new serviceData.serviceType();
+          // we shall throw exception...
+          throw new Error(`An error occurred while instantiating the service named '${serviceName}' and scope named '${scopeName}'.`);
         }
+      }
 
-        return instance;
-      default:
-        return serviceData.instance;
+      // if scope is anything other than transient...
+      if (serviceData.scope !== ServiceScope.Transient) {
+        // we shall assign the newly created instance to the service data...
+        serviceData.instance = instance;
+      }
     }
+
+    return instance;
   }
 
   public register<Type>(serviceType: ServiceType<Type>, scope?: ServiceScope,
@@ -96,23 +106,9 @@ export class ServiceProvider implements IServiceProvider {
     const existingServiceData = this.serviceDataMap.get(serviceKey);
 
     if (typeof existingServiceData !== "undefined") {
-      throw new Error("Requested service is already registered.");
-    }
+      // throw new Error("Requested service is already registered.");
 
-    let instance: any = undefined;
-
-    if (scope !== ServiceScope.Transient) {
-      // if callback is provided...
-      if (typeof createCallback === "function") {
-        // executes the callback to create new instance...
-        instance = createCallback(serviceType);
-      }
-
-      // if callback function is not provided or it did not return an instance...
-      if (!ObjectUtilities.isObject(instance)) {
-        // executes the default constructor...
-        instance = new serviceType();
-      }
+      return this;
     }
 
     const serviceData: ServiceData = Object.create(null);
@@ -120,7 +116,7 @@ export class ServiceProvider implements IServiceProvider {
     serviceData.scopeName = scopeName!;
     serviceData.scope = scope!;
     serviceData.serviceType = serviceType;
-    serviceData.instance = instance;
+    serviceData.instance = undefined;
     serviceData.createCallback = createCallback;
 
     this.serviceDataMap.set(serviceKey, serviceData);
@@ -141,7 +137,9 @@ export class ServiceProvider implements IServiceProvider {
     const existingServiceData = this.serviceDataMap.get(serviceKey);
 
     if (typeof existingServiceData !== "undefined") {
-      throw new Error("Requested service is already registered.");
+      // throw new Error("Requested service is already registered.");
+
+      return this;
     }
 
     const scope = StringUtilities.isEmpty(scopeName)
