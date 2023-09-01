@@ -1,4 +1,4 @@
-import { Map } from "@shahadul-17/collections";
+import { IMap, Map, } from "@shahadul-17/collections";
 import { StringUtilities, ObjectUtilities, } from "@shahadul-17/utilities";
 import { ServiceData } from "./service-data.t";
 import { IServiceProvider } from "./service-provider.i";
@@ -6,11 +6,15 @@ import { ServiceScope } from "./service-scope.e";
 import { ServiceType } from "./service-type.t";
 import { ServiceCreateCallback } from "./service-create-callback.t";
 
-const SERVICE_KEY_PREFIX = "$_SVC_";
+const VALID_SCOPES = [
+  ServiceScope.Singleton,
+  ServiceScope.Scoped,
+  ServiceScope.Transient,
+];
 
 export class ServiceProvider implements IServiceProvider {
 
-  private readonly serviceDataMap = new Map<string, ServiceData>();
+  private readonly serviceDataMap: IMap<string, ServiceData<any>> = new Map<string, ServiceData<any>>();
 
   private constructor() { }
 
@@ -34,125 +38,109 @@ export class ServiceProvider implements IServiceProvider {
       throw new Error(`Invalid service name '${serviceName}' provided.`);
     }
 
-    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
-      scopeName, StringUtilities.getEmptyString(), true);
-
-    const serviceKey = ServiceProvider.populateServiceKey(serviceName, scopeName);
-    const serviceData = this.serviceDataMap.get(serviceKey);
+    const serviceData = this.serviceDataMap.get(serviceName);
 
     if (typeof serviceData === "undefined") {
-      throw new Error(`Requested service with name, '${serviceName}' and scope name, '${scopeName}' was not found.`);
+      throw new Error(`Requested service with name, '${serviceName}' was not found.`);
     }
 
-    let instance: any = serviceData.instance;
-
-    // if the instance is not an object...
-    if (!ObjectUtilities.isObject(instance)) {
-      // if callback is available...
-      if (typeof serviceData.createCallback === "function") {
-        // we shall execute the callback to create new instance...
-        instance = serviceData.createCallback(serviceData.serviceType);
-      }
-
-      // if callback function is not provided or it did not return an instance...
-      if (!ObjectUtilities.isObject(instance)) {
-        // executes the default constructor...
-        instance = new serviceData.serviceType();
-
-        // if still the instance is not an object...
-        if (!ObjectUtilities.isObject(instance)) {
-          // we shall throw exception...
-          throw new Error(`An error occurred while instantiating the service named '${serviceName}' and scope named '${scopeName}'.`);
+    switch (serviceData.scope) {
+      // if the service scope is 'Transient'...
+      case ServiceScope.Transient:
+        // we shall create new instance for each request...
+        return ServiceProvider.createServiceInstance(serviceData);
+      // else if the service scope is 'Singleton'...
+      case ServiceScope.Singleton:
+        // and if the singleton instance is not an object...
+        if (!ObjectUtilities.isObject(serviceData.singletonInstance)) {
+          // we shall create new instance and assign that to service data...
+          serviceData.singletonInstance = ServiceProvider.createServiceInstance(serviceData);
         }
-      }
 
-      // if scope is anything other than transient...
-      if (serviceData.scope !== ServiceScope.Transient) {
-        // we shall assign the newly created instance to the service data...
-        serviceData.instance = instance;
-      }
+        // finally, we shall return the singleton instance...
+        return serviceData.singletonInstance;
+      case ServiceScope.Scoped:
+        // we'll first sanitize the scope name...
+        scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
+          scopeName, StringUtilities.getEmptyString(), true);
+
+        // if scope name is an empty string...
+        if (StringUtilities.isEmpty(scopeName)) {
+          throw new Error("Scope name not provided.");
+        }
+
+        // if the scoped instance map is not an object...
+        if (!ObjectUtilities.isObject(serviceData.scopedInstanceMap)) {
+          // we shall create a new one and assign it to service data...
+          serviceData.scopedInstanceMap = new Map();
+        }
+
+        let instance = serviceData.scopedInstanceMap!.get(scopeName!);
+
+        // if the instance is an object, we'll return that...
+        if (ObjectUtilities.isObject(instance)) { return instance; }
+
+        // or else, we'll create a new instance...
+        instance = ServiceProvider.createServiceInstance(serviceData);
+
+        // and set that to the scoped instance map...
+        serviceData.scopedInstanceMap!.set(scopeName!, instance);
+
+        // finally, we shall return the scoped instance...
+        return instance;
+      default:
+        throw new Error(`Unidentified service scope, '${serviceData.scope}' detected.`);
     }
-
-    return instance;
   }
 
   public register<Type>(serviceType: ServiceType<Type>, scope?: ServiceScope,
-    scopeName?: string, createCallback?: ServiceCreateCallback<Type>): IServiceProvider {
+    createCallback?: ServiceCreateCallback<Type>): IServiceProvider {
     const serviceName = ServiceProvider.getServiceName(serviceType);
 
     // if service name is empty, we shall throw error...
-    if (StringUtilities.isEmpty(serviceName)) { throw new Error("An unexpected error occurred while reading service name."); }
+    if (StringUtilities.isEmpty(serviceName)) {
+      throw new Error("An unexpected error occurred while reading service name.");
+    }
     // if valid scope is not provided, we shall set Singleton as the default...
-    if (StringUtilities.isUndefinedOrNull(scope) || [ServiceScope.Singleton, ServiceScope.Scoped, ServiceScope.Transient].indexOf(scope!) === -1) {
+    if (!ServiceProvider.isValidScope(scope)) {
       scope = ServiceScope.Singleton;
     }
 
-    // sanitizes the scope name...
-    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
-      scopeName, StringUtilities.getEmptyString(), true);
+    const existingServiceData = this.serviceDataMap.get(serviceName);
 
-    // if the provided service shall be registered as scoped
-    // but scope name is empty, we shall throw error...
-    if (scope === ServiceScope.Scoped && StringUtilities.isEmpty(scopeName)) {
-      throw new Error("Scope name must be provided to register scoped services.");
-    }
-    // if scope name is provided but the provided scope is not 'Scoped'...
-    if (!StringUtilities.isEmpty(scopeName) && scope !== ServiceScope.Scoped) {
-      // we shall set the scope to 'Scoped'...
-      scope = ServiceScope.Scoped;
-    }
-
-    const serviceKey = ServiceProvider.populateServiceKey(serviceName, scopeName);
-    const existingServiceData = this.serviceDataMap.get(serviceKey);
-
+    // if the service is already registered, we won't re-register the service...
     if (typeof existingServiceData !== "undefined") {
-      // throw new Error("Requested service is already registered.");
-
-      return this;
+      throw new Error("Requested service is already registered.");
     }
 
-    const serviceData: ServiceData = Object.create(null);
-    serviceData.key = serviceKey;
-    serviceData.scopeName = scopeName!;
+    const serviceData: ServiceData<Type> = ObjectUtilities.getEmptyObject(true);
+    serviceData.name = serviceName;
     serviceData.scope = scope!;
     serviceData.serviceType = serviceType;
-    serviceData.instance = undefined;
     serviceData.createCallback = createCallback;
 
-    this.serviceDataMap.set(serviceKey, serviceData);
+    this.serviceDataMap.set(serviceName, serviceData);
 
     return this;
   }
 
-  public registerObject<Type>(serviceType: ServiceType<Type>, serviceObject: Type, scopeName?: string): IServiceProvider {
-    const serviceName = ServiceProvider.getServiceName(serviceType);
-
-    if (StringUtilities.isEmpty(serviceName)) { throw new Error("An unexpected error occurred while reading service name."); }
-    if (!ObjectUtilities.isObject(serviceObject)) { throw new Error("Invalid service object provided."); }
-
-    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
-      scopeName, StringUtilities.getEmptyString(), true);
-
-    const serviceKey = ServiceProvider.populateServiceKey(serviceName, scopeName);
-    const existingServiceData = this.serviceDataMap.get(serviceKey);
-
-    if (typeof existingServiceData !== "undefined") {
-      // throw new Error("Requested service is already registered.");
-
-      return this;
+  public registerSingleton<Type>(serviceType: ServiceType<Type>, instance: Type): IServiceProvider {
+    // if the provided service object is not an object, we'll throw an error...
+    if (!ObjectUtilities.isObject(instance)) {
+      throw new Error("Invalid service instance provided.");
     }
 
-    const scope = StringUtilities.isEmpty(scopeName)
-      ? ServiceScope.Singleton : ServiceScope.Scoped;
-    const serviceData: ServiceData = Object.create(null);
-    serviceData.key = serviceKey;
-    serviceData.scopeName = scopeName!;
-    serviceData.scope = scope;
-    serviceData.serviceType = serviceType;
-    serviceData.instance = serviceObject;
-    serviceData.createCallback = undefined;
+    // now we shall register the service...
+    this.register(serviceType, ServiceScope.Singleton);
 
-    this.serviceDataMap.set(serviceKey, serviceData);
+    // we don't need to check if the service name is empty because
+    // if it were empty, the register method would have thrown exception...
+    const serviceName = ServiceProvider.getServiceName(serviceType);
+    // we are also certain that service data is not undefined because
+    // the register method executed successfully...
+    const serviceData = this.serviceDataMap.get(serviceName) as ServiceData<Type>;
+    // now we shall just assign the service object as the singleton instance...
+    serviceData.singletonInstance = instance;
 
     return this;
   }
@@ -162,9 +150,27 @@ export class ServiceProvider implements IServiceProvider {
 
     if (StringUtilities.isEmpty(serviceName)) { return this; }
 
-    const serviceKey = ServiceProvider.populateServiceKey(serviceName, scopeName);
+    // we'll sanitize the scope name...
+    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
+      scopeName, StringUtilities.getEmptyString(), true);
 
-    this.serviceDataMap.delete(serviceKey);
+    // if the scope name is empty...
+    if (StringUtilities.isEmpty(scopeName)) {
+      // we shall unregister the entire service...
+      this.serviceDataMap.delete(serviceName);
+
+      return this;
+    }
+
+    // otherwise, we shall only unregister a scoped instance of the service...
+    const serviceData = this.serviceDataMap.get(serviceName);
+
+    // if no such service is registered, we'll not do anything...
+    if (!ObjectUtilities.isObject(serviceData)
+      || !ObjectUtilities.isObject(serviceData!.scopedInstanceMap)) { return this; }
+
+    // or else, we shall unregister the scoped instance of the service...
+    serviceData!.scopedInstanceMap!.delete(scopeName!);
 
     return this;
   }
@@ -177,6 +183,10 @@ export class ServiceProvider implements IServiceProvider {
 
   private static readonly instance: IServiceProvider = new ServiceProvider();
 
+  private static isValidScope(scope: undefined | ServiceScope): boolean {
+    return VALID_SCOPES.indexOf(scope!) !== -1;
+  }
+
   private static getServiceName<Type>(serviceType: ServiceType<Type>): string {
     if (typeof serviceType !== "function") { return StringUtilities.getEmptyString(); }
 
@@ -187,11 +197,31 @@ export class ServiceProvider implements IServiceProvider {
     return serviceName;
   }
 
-  private static populateServiceKey(serviceName: string, scopeName?: string): string {
-    scopeName = StringUtilities.getDefaultIfUndefinedOrNullOrEmpty(
-      scopeName, StringUtilities.getEmptyString(), true);
+  private static createServiceInstance<Type>(serviceData: ServiceData<Type>): Type {
+    let instance: undefined | Type = undefined;
 
-    return `${SERVICE_KEY_PREFIX}${scopeName}_${serviceName.toLowerCase()}`;
+    // if callback is available...
+    if (typeof serviceData.createCallback === "function") {
+      // we shall execute the callback to create new instance...
+      instance = serviceData.createCallback(serviceData.serviceType);
+    }
+
+    // if callback function is provided and it returned an object, we shall return that instance...
+    if (ObjectUtilities.isObject(instance)) { return instance!; }
+
+    try {
+      // otherwise, we'll execute the default constructor...
+      instance = new serviceData.serviceType();
+    } catch {
+      // we shall re-throw the exception...
+      throw new Error(`An error occurred while instantiating the service named '${serviceData.name}'.`);
+    }
+
+    // if the instantiation is successful...
+    if (ObjectUtilities.isObject(instance)) { return instance; }
+
+    // we shall throw exception...
+    throw new Error(`An error occurred while instantiating the service named '${serviceData.name}'.`);
   }
 
   public static getInstance(): IServiceProvider {

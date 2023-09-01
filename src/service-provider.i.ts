@@ -29,25 +29,25 @@ export interface IServiceProvider {
    * Registers a service.
    * @param serviceType Type of the service class.
    * @param scope Scope of the service.
-   * @param scopeName Name of the scope.
    * @param createCallback If callback function is provided, service provider
    * shall use during new service object creation.
    * @returns The service provider instance.
    */
   register<Type>(serviceType: ServiceType<Type>, scope?: ServiceScope,
-    scopeName?: string, createCallback?: ServiceCreateCallback<Type>): IServiceProvider;
+    createCallback?: ServiceCreateCallback<Type>): IServiceProvider;
 
   /**
-   * Registers a service object.
+   * Registers a singleton service instance.
    * @param serviceType Type of the service class.
-   * @param object The service object to register.
+   * @param instance The service instance to register.
    * @param scopeName Name of the scope.
    * @returns The service provider instance.
    */
-  registerObject<Type>(serviceType: ServiceType<Type>, object: Type, scopeName?: string): IServiceProvider;
+  registerSingleton<Type>(serviceType: ServiceType<Type>, instance: Type): IServiceProvider;
 
   /**
-   * Unregisters a service.
+   * Unregisters a service. If scope name is provided, this method
+   * shall only unregister a scoped instance of the service.
    * @param serviceType Type of the service class.
    * @param scopeName Name of the scope.
    * @returns The service provider instance.
